@@ -74,27 +74,96 @@ Resources:
         Name: tick_events
         TableType: EXTERNAL_TABLE
         Parameters:
-          classification: json
+          classification: parquet
           typeOfData: file
+        PartitionKeys:
+          - Name: year
+            Type: string
+          - Name: month
+            Type: string
+          - Name: day
+            Type: string
+          - Name: instrument_folder
+            Type: string
         StorageDescriptor:
           Columns:
             - Name: event_time
               Type: string
-            - Name: instrument
+            - Name: ingestion_time
+              Type: string
+            - Name: exchange_timestamp
+              Type: string
+            - Name: last_trade_time
               Type: string
             - Name: instrument_token
               Type: int
-            - Name: ltp
-              Type: double
-            - Name: exchange_timestamp
+            - Name: tradingsymbol
               Type: string
-            - Name: ingestion_time
+            - Name: exchange
+              Type: string
+            - Name: segment
+              Type: string
+            - Name: name
+              Type: string
+            - Name: underlying
+              Type: string
+            - Name: basket_role
+              Type: string
+            - Name: instrument_folder
+              Type: string
+            - Name: instrument_type
+              Type: string
+            - Name: option_type
+              Type: string
+            - Name: expiry
+              Type: string
+            - Name: strike
+              Type: double
+            - Name: lot_size
+              Type: int
+            - Name: tick_size
+              Type: double
+            - Name: mode
+              Type: string
+            - Name: last_price
+              Type: double
+            - Name: last_quantity
+              Type: int
+            - Name: average_price
+              Type: double
+            - Name: volume
+              Type: int
+            - Name: buy_quantity
+              Type: int
+            - Name: sell_quantity
+              Type: int
+            - Name: change
+              Type: double
+            - Name: oi
+              Type: int
+            - Name: oi_day_high
+              Type: int
+            - Name: oi_day_low
+              Type: int
+            - Name: open_price
+              Type: double
+            - Name: high_price
+              Type: double
+            - Name: low_price
+              Type: double
+            - Name: close_price
+              Type: double
+            - Name: depth_buy
+              Type: array<struct<quantity:int,price:double,orders:int>>
+            - Name: depth_sell
+              Type: array<struct<quantity:int,price:double,orders:int>>
+            - Name: raw_tick
               Type: string
           Location: !Sub "s3://${DataBucket}/ticks/"
-          InputFormat: org.apache.hadoop.mapred.TextInputFormat
-          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
           SerdeInfo:
-            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
 
   FirehoseRole:
     Type: AWS::IAM::Role
@@ -157,21 +226,42 @@ Resources:
       ExtendedS3DestinationConfiguration:
         BucketARN: !GetAtt DataBucket.Arn
         RoleARN: !GetAtt FirehoseRole.Arn
-        Prefix: ticks/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+        Prefix: ticks/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/!{partitionKeyFromQuery:instrument_folder}/
         ErrorOutputPrefix: errors/!{firehose:error-output-type}/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/
+        CustomTimeZone: Asia/Kolkata
         BufferingHints:
           IntervalInSeconds: !Ref FirehoseBufferIntervalSeconds
           SizeInMBs: !Ref FirehoseBufferSizeMBs
         CompressionFormat: UNCOMPRESSED
+        DynamicPartitioningConfiguration:
+          Enabled: true
+          RetryOptions:
+            DurationInSeconds: 300
         CloudWatchLoggingOptions:
           Enabled: true
           LogGroupName: !Ref FirehoseLogsGroup
           LogStreamName: !Ref FirehoseLogsStream
+        ProcessingConfiguration:
+          Enabled: true
+          Processors:
+            - Type: MetadataExtraction
+              Parameters:
+                - ParameterName: MetadataExtractionQuery
+                  ParameterValue: "{instrument_folder:.instrument_folder}"
+                - ParameterName: JsonParsingEngine
+                  ParameterValue: JQ-1.6
+            - Type: AppendDelimiterToRecord
+              Parameters:
+                - ParameterName: Delimiter
+                  ParameterValue: "\\n"
         DataFormatConversionConfiguration:
           Enabled: true
           InputFormatConfiguration:
             Deserializer:
-              OpenXJsonSerDe: {}
+              OpenXJsonSerDe:
+                ConvertDotsInJsonKeysToUnderscores: true
+                ColumnToJsonKeyMappings:
+                  raw_tick: raw_tick_json
           OutputFormatConfiguration:
             Serializer:
               ParquetSerDe: {}
