@@ -168,7 +168,7 @@ class InstrumentSelector:
                 instrument,
                 underlying=underlying,
                 basket_role="index" if underlying != "INDIA_VIX" else "volatility_index",
-                mode=self.settings.index_mode,
+                mode="full",
             )
         raise ValueError(f"Unable to find index instrument {exchange}:{tradingsymbol}")
 
@@ -199,7 +199,7 @@ class InstrumentSelector:
             front_future,
             underlying=underlying,
             basket_role="future",
-            mode=self.settings.derivative_mode,
+            mode="full",
         )
 
     def _find_option_basket(
@@ -220,7 +220,7 @@ class InstrumentSelector:
                 instrument,
                 underlying=underlying,
                 basket_role="option",
-                mode=self.settings.derivative_mode,
+                mode="full",
             )
             for instrument in instruments
             if instrument.get("exchange") == exchange

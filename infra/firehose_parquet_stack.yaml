@@ -109,8 +109,6 @@ Resources:
               Type: string
             - Name: basket_role
               Type: string
-            - Name: instrument_folder
-              Type: string
             - Name: instrument_type
               Type: string
             - Name: option_type

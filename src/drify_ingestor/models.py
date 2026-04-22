@@ -23,14 +23,13 @@ class TickEvent:
     name: str
     underlying: str
     basket_role: str
-    instrument_folder: str
     instrument_type: str
     option_type: str | None
     expiry: str | None
     strike: float | None
     lot_size: int | None
     tick_size: float | None
-    mode: str | None
+    mode: str
     last_price: float | None
     last_quantity: int | None
     average_price: float | None
@@ -50,7 +49,16 @@ class TickEvent:
     raw_tick_json: str
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload["instrument_folder"] = _instrument_folder_key(
+            underlying=self.underlying,
+            basket_role=self.basket_role,
+            instrument_type=self.instrument_type,
+            expiry=self.expiry,
+            strike=self.strike,
+            tradingsymbol=self.tradingsymbol,
+        )
+        return payload
 
 
 def build_tick_event(tick: dict[str, Any], instrument: SelectedInstrument) -> TickEvent:
@@ -74,14 +82,13 @@ def build_tick_event(tick: dict[str, Any], instrument: SelectedInstrument) -> Ti
         name=instrument.name,
         underlying=instrument.underlying,
         basket_role=instrument.basket_role,
-        instrument_folder=_instrument_folder(instrument),
         instrument_type=instrument.instrument_type,
         option_type=instrument.option_type,
         expiry=instrument.expiry,
         strike=instrument.strike,
         lot_size=instrument.lot_size,
         tick_size=instrument.tick_size,
-        mode=str(normalized_tick.get("mode")) if normalized_tick.get("mode") is not None else None,
+        mode=instrument.mode,
         last_price=_to_float(tick.get("last_price")),
         last_quantity=_to_int(tick.get("last_quantity") or tick.get("last_traded_quantity")),
         average_price=_to_float(tick.get("average_price") or tick.get("average_traded_price")),
@@ -121,19 +128,37 @@ def _to_json_string(value: Any) -> str:
 
 
 def _instrument_folder(instrument: SelectedInstrument) -> str:
-    if instrument.basket_role == "index":
-        return f"{instrument.underlying}_SPOT"
-    if instrument.basket_role == "volatility_index":
-        return instrument.underlying
-    if instrument.basket_role == "future":
-        expiry = _format_expiry_label(instrument.expiry)
-        return f"{instrument.underlying}_{expiry}_FUT"
-    if instrument.basket_role == "option":
-        expiry = _format_expiry_label(instrument.expiry)
-        strike = _format_strike_label(instrument.strike)
-        option_type = instrument.option_type or instrument.instrument_type
-        return f"{instrument.underlying}_{expiry}_{strike}_{option_type}"
-    return instrument.tradingsymbol.replace(" ", "_").upper()
+    return _instrument_folder_key(
+        underlying=instrument.underlying,
+        basket_role=instrument.basket_role,
+        instrument_type=instrument.instrument_type,
+        expiry=instrument.expiry,
+        strike=instrument.strike,
+        tradingsymbol=instrument.tradingsymbol,
+    )
+
+
+def _instrument_folder_key(
+    *,
+    underlying: str,
+    basket_role: str,
+    instrument_type: str,
+    expiry: str | None,
+    strike: float | None,
+    tradingsymbol: str,
+) -> str:
+    if basket_role == "index":
+        return f"{underlying}_SPOT"
+    if basket_role == "volatility_index":
+        return underlying
+    if basket_role == "future":
+        expiry_label = _format_expiry_label(expiry)
+        return f"{underlying}_{expiry_label}_FUT"
+    if basket_role == "option":
+        expiry_label = _format_expiry_label(expiry)
+        strike_label = _format_strike_label(strike)
+        return f"{underlying}_{expiry_label}_{strike_label}_{instrument_type}"
+    return tradingsymbol.replace(" ", "_").upper()
 
 
 def _format_expiry_label(expiry: str | None) -> str:
@@ -175,9 +200,9 @@ def _to_iso8601(value: Any) -> str | None:
     if isinstance(value, datetime):
         if value.tzinfo is None:
             value = value.replace(tzinfo=IST)
-        return value.astimezone(IST).isoformat()
+        return value.astimezone(IST).isoformat(timespec="milliseconds")
     return str(value)
 
 
 def _now_ist() -> str:
-    return datetime.now(tz=IST).isoformat()
+    return datetime.now(tz=IST).isoformat(timespec="milliseconds")

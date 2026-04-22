@@ -88,10 +88,10 @@ Each event includes:
 - market timestamps
 - instrument metadata
 - option/future context
-- top-level market fields such as LTP, volume, OI, OHLC
-- market depth arrays
+- core market fields such as LTP, volume, change, OI, and OHLC
+- additional raw tick context such as quantities, depth, and a raw tick JSON snapshot
+- websocket mode, currently standardized as `full`
 - an `instrument_folder` field used by Firehose for S3 partition routing
-- a JSON-string form of the raw tick for traceability
 
 ### 5. AWS delivery
 
