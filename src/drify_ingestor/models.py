@@ -199,10 +199,10 @@ def _to_iso8601(value: Any) -> str | None:
         return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            value = value.replace(tzinfo=IST)
-        return value.astimezone(IST).isoformat(timespec="milliseconds")
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(IST).replace(tzinfo=None).isoformat(timespec="milliseconds")
     return str(value)
 
 
 def _now_ist() -> str:
-    return datetime.now(tz=IST).isoformat(timespec="milliseconds")
+    return datetime.now(tz=IST).replace(tzinfo=None).isoformat(timespec="milliseconds")
