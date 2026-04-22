@@ -39,6 +39,9 @@ class Settings:
     websocket_connect_timeout: int
     kinesis_publish_retries: int
     kinesis_publish_backoff_seconds: float
+    kinesis_batch_size: int
+    kinesis_flush_interval_ms: int
+    kinesis_max_queue_size: int
     schedule: MarketSchedule
 
     @classmethod
@@ -61,6 +64,9 @@ class Settings:
             websocket_connect_timeout=int(os.getenv("KITE_CONNECT_TIMEOUT", "30")),
             kinesis_publish_retries=int(os.getenv("KINESIS_PUBLISH_RETRIES", "3")),
             kinesis_publish_backoff_seconds=float(os.getenv("KINESIS_PUBLISH_BACKOFF_SECONDS", "1.0")),
+            kinesis_batch_size=int(os.getenv("KINESIS_BATCH_SIZE", "100")),
+            kinesis_flush_interval_ms=int(os.getenv("KINESIS_FLUSH_INTERVAL_MS", "50")),
+            kinesis_max_queue_size=int(os.getenv("KINESIS_MAX_QUEUE_SIZE", "10000")),
             schedule=MarketSchedule(
                 premarket_start=_parse_time(os.getenv("PREMARKET_START_TIME", "09:00")),
                 premarket_end=_parse_time(os.getenv("PREMARKET_END_TIME", "09:08")),

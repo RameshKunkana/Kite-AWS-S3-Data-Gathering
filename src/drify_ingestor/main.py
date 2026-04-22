@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import time
 from dataclasses import dataclass
@@ -132,7 +133,11 @@ def main() -> None:
         region_name=settings.aws_region,
         publish_retries=settings.kinesis_publish_retries,
         publish_backoff_seconds=settings.kinesis_publish_backoff_seconds,
+        batch_size=settings.kinesis_batch_size,
+        flush_interval_ms=settings.kinesis_flush_interval_ms,
+        max_queue_size=settings.kinesis_max_queue_size,
     )
+    atexit.register(publisher.close)
 
     def handle_tick(tick: dict) -> None:
         instrument_token = tick.get("instrument_token")
@@ -168,7 +173,10 @@ def main() -> None:
         connect_timeout=settings.websocket_connect_timeout,
         tick_handler=handle_tick,
     )
-    streamer.connect()
+    try:
+        streamer.connect()
+    finally:
+        publisher.close()
 
 
 if __name__ == "__main__":
