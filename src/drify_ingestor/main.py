@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import signal
 import time
 from dataclasses import dataclass
 from datetime import datetime, time as time_value, timedelta, timezone
@@ -41,8 +42,10 @@ def _wait_until(target_time: time_value, label: str) -> None:
         sleep_seconds = (target - now).total_seconds()
 
 
-def _has_market_closed(market_end: time_value) -> bool:
-    return datetime.now(tz=IST).time() >= market_end
+def _has_market_closed(market_end: time_value, grace_seconds: int) -> bool:
+    now = datetime.now(tz=IST)
+    deadline = datetime.combine(now.date(), market_end, tzinfo=IST) + timedelta(seconds=grace_seconds)
+    return now >= deadline
 
 
 def _startup_plan(schedule: MarketSchedule) -> StartupPlan:
@@ -101,82 +104,112 @@ def _collect_reference_prices(
 
 
 def main() -> None:
-    settings = Settings.from_env()
-    configure_logging(settings.log_level)
-    if _has_market_closed(settings.schedule.market_end):
-        LOGGER.info("Market has already closed for today, exiting without starting the streamer")
-        return
-
-    plan = _startup_plan(settings.schedule)
-    LOGGER.info("Startup mode selected: %s", plan.mode)
-
-    selector = InstrumentSelector(settings)
-
-    if plan.should_wait_for_premarket:
-        _wait_until(settings.schedule.premarket_start, "pre-market start")
-
-    reference_prices: dict[str, float] = {}
-    if plan.should_collect_premarket_references:
-        reference_prices = _collect_reference_prices(selector, settings)
-    else:
-        LOGGER.info(
-            "Late start detected after basket selection cutoff; building basket from live quote snapshot"
-        )
-
-    market_basket = selector.build_market_basket(reference_prices=reference_prices)
-
-    if plan.should_wait_for_market_open:
-        _wait_until(settings.schedule.market_start, "market open")
-
-    publisher = KinesisPublisher(
-        stream_name=settings.kinesis_stream_name,
-        region_name=settings.aws_region,
-        publish_retries=settings.kinesis_publish_retries,
-        publish_backoff_seconds=settings.kinesis_publish_backoff_seconds,
-        batch_size=settings.kinesis_batch_size,
-        flush_interval_ms=settings.kinesis_flush_interval_ms,
-        max_queue_size=settings.kinesis_max_queue_size,
-    )
-    atexit.register(publisher.close)
-
-    def handle_tick(tick: dict) -> None:
-        instrument_token = tick.get("instrument_token")
-        instrument = market_basket.instruments_by_token.get(instrument_token)
-        if instrument is None:
-            LOGGER.debug("Skipping tick for unsubscribed instrument_token=%s", instrument_token)
-            return
-
-        if "last_price" not in tick and "ohlc" not in tick:
-            LOGGER.debug("Skipping tick without last_price: %s", tick)
-            return
-
-        event = build_tick_event(tick, instrument)
-        publisher.publish(
-            record=event.to_dict(),
-            partition_key=f"{settings.kinesis_partition_key}:{instrument.underlying}:{instrument.instrument_token}",
-        )
-        LOGGER.debug(
-            "Published tick symbol=%s timestamp=%s ltp=%s stream=%s",
-            instrument.tradingsymbol,
-            event.event_time,
-            event.last_price,
-            settings.kinesis_stream_name,
-        )
-
-    streamer = KiteBasketStreamer(
-        api_key=settings.kite_api_key,
-        access_token=settings.kite_access_token,
-        market_basket=market_basket,
-        schedule=settings.schedule,
-        reconnect_max_tries=settings.websocket_reconnect_max_tries,
-        reconnect_max_delay=settings.websocket_reconnect_max_delay,
-        connect_timeout=settings.websocket_connect_timeout,
-        tick_handler=handle_tick,
-    )
+    streamer: KiteBasketStreamer | None = None
+    publisher: KinesisPublisher | None = None
     try:
+        settings = Settings.from_env()
+        configure_logging(settings.log_level)
+        if _has_market_closed(settings.schedule.market_end, settings.market_close_grace_seconds):
+            LOGGER.info(
+                "Market close plus grace window has already passed for today, exiting without starting the streamer"
+            )
+            return
+
+        plan = _startup_plan(settings.schedule)
+        LOGGER.info("Startup mode selected: %s", plan.mode)
+
+        selector = InstrumentSelector(settings)
+
+        if plan.should_wait_for_premarket:
+            _wait_until(settings.schedule.premarket_start, "pre-market start")
+
+        reference_prices: dict[str, float] = {}
+        if plan.should_collect_premarket_references:
+            reference_prices = _collect_reference_prices(selector, settings)
+        else:
+            LOGGER.info(
+                "Late start detected after basket selection cutoff; building basket from live quote snapshot"
+            )
+
+        market_basket = selector.build_market_basket(reference_prices=reference_prices)
+
+        if plan.should_wait_for_market_open:
+            _wait_until(settings.schedule.market_start, "market open")
+
+        publisher = KinesisPublisher(
+            stream_name=settings.kinesis_stream_name,
+            region_name=settings.aws_region,
+            publish_retries=settings.kinesis_publish_retries,
+            publish_backoff_seconds=settings.kinesis_publish_backoff_seconds,
+            batch_size=settings.kinesis_batch_size,
+            flush_interval_ms=settings.kinesis_flush_interval_ms,
+            max_queue_size=settings.kinesis_max_queue_size,
+        )
+        atexit.register(publisher.close)
+
+        def handle_tick(tick: dict) -> None:
+            instrument_token = tick.get("instrument_token")
+            instrument = market_basket.instruments_by_token.get(instrument_token)
+            if instrument is None:
+                LOGGER.debug("Skipping tick for unsubscribed instrument_token=%s", instrument_token)
+                return
+
+            if "last_price" not in tick and "ohlc" not in tick:
+                LOGGER.debug("Skipping tick without last_price: %s", tick)
+                return
+
+            try:
+                event = build_tick_event(tick, instrument)
+                publisher.publish(
+                    record=event.to_dict(),
+                    partition_key=f"{settings.kinesis_partition_key}:{instrument.underlying}:{instrument.instrument_token}",
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Failed to process/publish tick symbol=%s instrument_token=%s",
+                    instrument.tradingsymbol,
+                    instrument_token,
+                )
+                return
+
+            LOGGER.debug(
+                "Published tick symbol=%s timestamp=%s ltp=%s stream=%s",
+                instrument.tradingsymbol,
+                event.event_time,
+                event.last_price,
+                settings.kinesis_stream_name,
+            )
+
+        streamer = KiteBasketStreamer(
+            api_key=settings.kite_api_key,
+            access_token=settings.kite_access_token,
+            market_basket=market_basket,
+            schedule=settings.schedule,
+            market_close_grace_seconds=settings.market_close_grace_seconds,
+            reconnect_max_tries=settings.websocket_reconnect_max_tries,
+            reconnect_max_delay=settings.websocket_reconnect_max_delay,
+            connect_timeout=settings.websocket_connect_timeout,
+            tick_handler=handle_tick,
+        )
+
+        def _handle_shutdown_signal(signum: int, frame: object) -> None:
+            LOGGER.info("Received shutdown signal=%s, stopping data collection gracefully", signum)
+            if streamer is not None:
+                streamer.stop()
+
+        signal.signal(signal.SIGINT, _handle_shutdown_signal)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+
         streamer.connect()
+    except Exception:
+        LOGGER.exception("Fatal error in live data collection service")
+        raise
     finally:
-        publisher.close()
+        if streamer is not None:
+            streamer.stop()
+        if publisher is not None:
+            publisher.close()
 
 
 if __name__ == "__main__":

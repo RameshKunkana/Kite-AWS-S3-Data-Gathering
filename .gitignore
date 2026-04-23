@@ -8,4 +8,5 @@ build/
 *.pyc
 *.pyo
 *.pyd
+.claude/
 

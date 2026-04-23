@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  DriFy daily compaction pipeline — Glue Spark job + EventBridge Scheduler.
+  Runs at 15:40 IST Mon–Fri, reads raw Firehose Parquet files from S3 (ticks/),
+  compacts to one file per instrument, and writes to S3 (processed/).
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: drify-market-data
+    Description: S3 bucket that holds both raw ticks and processed output
+
+  GlueScriptS3Key:
+    Type: String
+    Default: scripts/glue_daily_compaction.py
+    Description: S3 key where the Glue script is uploaded inside BucketName
+
+  RawRootPrefix:
+    Type: String
+    Default: ticks
+    Description: S3 prefix for raw Firehose files
+
+  ProcessedRootPrefix:
+    Type: String
+    Default: processed
+    Description: S3 prefix for compacted output files
+
+  ScheduleEnabled:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Set to ENABLED once you are confident in the pipeline
+
+Resources:
+
+  # ── IAM role for the Glue job ─────────────────────────────────────────────
+
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drify-glue-compaction-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: S3CompactionAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}"
+                  - !Sub "arn:aws:s3:::${BucketName}/${RawRootPrefix}/*"
+                  - !Sub "arn:aws:s3:::${BucketName}/${GlueScriptS3Key}"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}"
+                  - !Sub "arn:aws:s3:::${BucketName}/${ProcessedRootPrefix}/*"
+                  - !Sub "arn:aws:s3:::${BucketName}/glue-temp/*"
+
+  # ── Glue job ──────────────────────────────────────────────────────────────
+
+  GlueCompactionJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: drify-daily-compaction
+      Description: Compact raw Firehose Parquet files into one file per instrument per day
+      Role: !GetAtt GlueJobRole.Arn
+      GlueVersion: "4.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 60
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      Command:
+        Name: glueetl
+        ScriptLocation: !Sub "s3://${BucketName}/${GlueScriptS3Key}"
+        PythonVersion: "3"
+      DefaultArguments:
+        "--job-bookmark-option": "job-bookmark-disable"
+        "--TempDir": !Sub "s3://${BucketName}/glue-temp/"
+        "--bucket": !Ref BucketName
+        "--raw_root_prefix": !Ref RawRootPrefix
+        "--processed_root_prefix": !Ref ProcessedRootPrefix
+        "--region": !Ref AWS::Region
+
+  # ── IAM role for EventBridge Scheduler ───────────────────────────────────
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: drify-eventbridge-glue-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartGlueJob
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: glue:StartJobRun
+                Resource: !Sub "arn:aws:glue:${AWS::Region}:${AWS::AccountId}:job/${GlueCompactionJob}"
+
+  # ── EventBridge Scheduler ─────────────────────────────────────────────────
+  # Runs Mon–Fri at 15:40 IST.
+  # The Glue job computes today's IST date itself — no date argument needed.
+
+  DailyCompactionSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: drify-daily-compaction
+      Description: Trigger DriFy Glue compaction job at 15:40 IST on market days
+      ScheduleExpression: "cron(40 15 ? * MON-FRI *)"
+      ScheduleExpressionTimezone: "Asia/Kolkata"
+      State: !Ref ScheduleEnabled
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !Sub "arn:aws:scheduler:::aws-sdk:glue:startJobRun"
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"JobName": "${GlueCompactionJob}"}'
+
+Outputs:
+  GlueJobName:
+    Value: !Ref GlueCompactionJob
+    Description: Glue job name — use this to trigger a manual run
+
+  ScriptUploadCommand:
+    Value: !Sub "aws s3 cp infra/glue_daily_compaction.py s3://${BucketName}/${GlueScriptS3Key} --region ${AWS::Region}"
+    Description: Command to upload the Glue script to S3 before deploying
+
+  ManualRunCommand:
+    Value: !Sub "aws glue start-job-run --job-name ${GlueCompactionJob} --region ${AWS::Region}"
+    Description: Command to trigger a manual run today
+
+  ManualRunWithDateCommand:
+    Value: !Sub "aws glue start-job-run --job-name ${GlueCompactionJob} --arguments '{\"--date\":\"2026-04-23\"}' --region ${AWS::Region}"
+    Description: Command to trigger a manual run for a specific date

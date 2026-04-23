@@ -46,7 +46,7 @@ class TickEvent:
     close_price: float | None
     depth_buy: list[dict[str, Any]]
     depth_sell: list[dict[str, Any]]
-    raw_tick_json: str
+    raw_tick: str
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -105,7 +105,7 @@ def build_tick_event(tick: dict[str, Any], instrument: SelectedInstrument) -> Ti
         close_price=_to_float(ohlc.get("close")),
         depth_buy=_to_depth(depth.get("buy")),
         depth_sell=_to_depth(depth.get("sell")),
-        raw_tick_json=_to_json_string(normalized_tick),
+        raw_tick=_to_json_string(normalized_tick),
     )
 
 

@@ -123,6 +123,7 @@ class KiteBasketStreamer:
         access_token: str,
         market_basket: MarketBasket,
         schedule: MarketSchedule,
+        market_close_grace_seconds: int,
         reconnect_max_tries: int,
         reconnect_max_delay: int,
         connect_timeout: int,
@@ -130,8 +131,11 @@ class KiteBasketStreamer:
     ) -> None:
         self.market_basket = market_basket
         self.schedule = schedule
+        self.market_close_grace_seconds = market_close_grace_seconds
         self.tick_handler = tick_handler
         self._closed_for_day = False
+        self._close_lock = threading.Lock()
+        self._ws: Any | None = None
         self.ticker = KiteTicker(
             api_key,
             access_token,
@@ -152,9 +156,11 @@ class KiteBasketStreamer:
             "Connecting to Kite WebSocket for %s instruments",
             len(self.market_basket.instruments_by_token),
         )
+        self._start_market_close_watcher()
         self.ticker.connect(threaded=False)
 
     def _on_connect(self, ws: Any, response: Any) -> None:
+        self._ws = ws
         if self._market_closed():
             LOGGER.info("Market close reached before subscription, closing WebSocket cleanly")
             self._close_for_day(ws)
@@ -178,7 +184,13 @@ class KiteBasketStreamer:
             instrument_token = tick.get("instrument_token")
             if instrument_token not in self.market_basket.instruments_by_token:
                 continue
-            self.tick_handler(tick)
+            try:
+                self.tick_handler(tick)
+            except Exception:
+                LOGGER.exception(
+                    "Unhandled exception while processing tick instrument_token=%s",
+                    instrument_token,
+                )
 
     def _on_close(self, ws: Any, code: int, reason: str) -> None:
         if self._closed_for_day:
@@ -199,12 +211,44 @@ class KiteBasketStreamer:
             return
         LOGGER.error("Kite WebSocket stopped reconnecting")
 
-    def _close_for_day(self, ws: Any) -> None:
-        self._closed_for_day = True
-        if hasattr(self.ticker, "stop_retry"):
-            self.ticker.stop_retry()
-        ws.close()
+    def stop(self) -> None:
+        self._close_for_day(self._ws)
+
+    def _close_for_day(self, ws: Any | None) -> None:
+        with self._close_lock:
+            if self._closed_for_day:
+                return
+            self._closed_for_day = True
+            if hasattr(self.ticker, "stop_retry"):
+                self.ticker.stop_retry()
+            if ws is not None:
+                ws.close()
 
     def _market_closed(self) -> bool:
-        current_time = datetime.now(tz=IST).time()
-        return current_time >= self.schedule.market_end
+        return datetime.now(tz=IST) >= self._market_close_deadline()
+
+    def _start_market_close_watcher(self) -> None:
+        watcher = threading.Thread(
+            target=self._watch_for_market_close,
+            name="market-close-watcher",
+            daemon=True,
+        )
+        watcher.start()
+
+    def _watch_for_market_close(self) -> None:
+        while not self._closed_for_day:
+            if self._market_closed():
+                LOGGER.info(
+                    "Market close watcher reached %s plus %ss grace, shutting down live stream",
+                    self.schedule.market_end.isoformat(timespec="minutes"),
+                    self.market_close_grace_seconds,
+                )
+                self._close_for_day(self._ws)
+                return
+            time.sleep(1)
+
+    def _market_close_deadline(self) -> datetime:
+        now = datetime.now(tz=IST)
+        return datetime.combine(now.date(), self.schedule.market_end, tzinfo=IST) + timedelta(
+            seconds=self.market_close_grace_seconds
+        )

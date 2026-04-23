@@ -305,6 +305,37 @@ The app warns when expected option contracts are missing for the configured stri
 
 Publishing is synchronous per tick today. This is simple and reliable for the current phase, but may need batching later if throughput requirements increase materially.
 
+### End-of-day compaction
+
+Raw Firehose output remains under:
+
+```text
+ticks/year=YYYY/month=MM/day=DD/<instrument_folder>/
+```
+
+To create one compacted parquet file per instrument for a trading day, use:
+
+```powershell
+python -m drify_ingestor.compaction --bucket drify-market-data --date 2026-04-22
+```
+
+This writes curated files to:
+
+```text
+curated/year=YYYY/month=MM/day=DD/<instrument_folder>/<instrument_folder>.parquet
+```
+
+You can compact a single instrument only:
+
+```powershell
+python -m drify_ingestor.compaction --bucket drify-market-data --date 2026-04-22 --instrument-folder NIFTY_24APR_22500_CE
+```
+
+Important:
+- raw Firehose files are left untouched
+- curated files overwrite the same curated output key for repeatable reruns
+- current compaction concatenates source parquet files in key order; global re-sorting is not yet part of the utility
+
 ### Firehose / Parquet validation
 
 After infra deployment, always validate:
