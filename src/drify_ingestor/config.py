@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -43,6 +43,7 @@ class Settings:
     kinesis_flush_interval_ms: int
     kinesis_max_queue_size: int
     market_close_grace_seconds: int
+    market_holidays: frozenset[date]
     schedule: MarketSchedule
 
     @classmethod
@@ -69,6 +70,7 @@ class Settings:
             kinesis_flush_interval_ms=int(os.getenv("KINESIS_FLUSH_INTERVAL_MS", "50")),
             kinesis_max_queue_size=int(os.getenv("KINESIS_MAX_QUEUE_SIZE", "10000")),
             market_close_grace_seconds=int(os.getenv("MARKET_CLOSE_GRACE_SECONDS", "120")),
+            market_holidays=_parse_holidays(os.getenv("MARKET_HOLIDAYS", "")),
             schedule=MarketSchedule(
                 premarket_start=_parse_time(os.getenv("PREMARKET_START_TIME", "09:00")),
                 premarket_end=_parse_time(os.getenv("PREMARKET_END_TIME", "09:08")),
@@ -77,6 +79,16 @@ class Settings:
                 market_end=_parse_time(os.getenv("MARKET_END_TIME", "15:30")),
             ),
         )
+
+
+def _parse_holidays(value: str) -> frozenset[date]:
+    if not value.strip():
+        return frozenset()
+    return frozenset(
+        date.fromisoformat(d.strip())
+        for d in value.split(",")
+        if d.strip()
+    )
 
 
 def _parse_time(value: str) -> time:

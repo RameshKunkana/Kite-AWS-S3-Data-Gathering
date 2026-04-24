@@ -63,12 +63,14 @@ class InstrumentSelector:
         self.kite = KiteConnect(api_key=settings.kite_api_key)
         self.kite.set_access_token(settings.kite_access_token)
         self._cached_instruments: list[dict[str, Any]] | None = None
+        self._by_exchange_symbol: dict[tuple[str, str], dict[str, Any]] = {}
+        self._by_exchange_name: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
     def build_reference_watchlist(self) -> dict[str, SelectedInstrument]:
-        instruments = self._instruments()
+        self._instruments()
         return {
-            "NIFTY": self._find_index(instruments, "NSE", "NIFTY 50", "NIFTY"),
-            "SENSEX": self._find_index(instruments, "BSE", "SENSEX", "SENSEX"),
+            "NIFTY": self._find_index("NSE", "NIFTY 50", "NIFTY"),
+            "SENSEX": self._find_index("BSE", "SENSEX", "SENSEX"),
         }
 
     def build_market_basket(
@@ -76,7 +78,7 @@ class InstrumentSelector:
         *,
         reference_prices: dict[str, float] | None = None,
     ) -> MarketBasket:
-        instruments = self._instruments()
+        self._instruments()
         index_quotes = self.kite.quote("NSE:NIFTY 50", "BSE:SENSEX", "NSE:INDIA VIX")
         reference_prices = reference_prices or {}
 
@@ -99,17 +101,17 @@ class InstrumentSelector:
         references["SENSEX"] = sensex_reference
 
         for selected in (
-            self._find_index(instruments, "NSE", "NIFTY 50", "NIFTY"),
-            self._find_index(instruments, "BSE", "SENSEX", "SENSEX"),
-            self._find_index(instruments, "NSE", "INDIA VIX", "INDIA_VIX"),
-            self._find_front_future(instruments, "NIFTY", "NFO"),
-            self._find_front_future(instruments, "SENSEX", "BFO"),
+            self._find_index("NSE", "NIFTY 50", "NIFTY"),
+            self._find_index("BSE", "SENSEX", "SENSEX"),
+            self._find_index("NSE", "INDIA VIX", "INDIA_VIX"),
+            self._find_front_future("NIFTY", "NFO"),
+            self._find_front_future("SENSEX", "BFO"),
         ):
             basket[selected.instrument_token] = selected
 
-        for option in self._find_option_basket(instruments, "NIFTY", "NFO", nifty_reference.atm_strike, self.settings.nifty_strike_step):
+        for option in self._find_option_basket("NIFTY", "NFO", nifty_reference.atm_strike, self.settings.nifty_strike_step):
             basket[option.instrument_token] = option
-        for option in self._find_option_basket(instruments, "SENSEX", "BFO", sensex_reference.atm_strike, self.settings.sensex_strike_step):
+        for option in self._find_option_basket("SENSEX", "BFO", sensex_reference.atm_strike, self.settings.sensex_strike_step):
             basket[option.instrument_token] = option
 
         LOGGER.info(
@@ -152,44 +154,45 @@ class InstrumentSelector:
 
     def _find_index(
         self,
-        instruments: list[dict[str, Any]],
         exchange: str,
         tradingsymbol: str,
         underlying: str,
     ) -> SelectedInstrument:
-        for instrument in instruments:
-            if instrument.get("exchange") != exchange:
-                continue
-            symbol = str(instrument.get("tradingsymbol") or "")
-            name = str(instrument.get("name") or "")
-            if symbol != tradingsymbol and name != tradingsymbol:
-                continue
-            return self._selected_instrument(
-                instrument,
-                underlying=underlying,
-                basket_role="index" if underlying != "INDIA_VIX" else "volatility_index",
-                mode="full",
-            )
-        raise ValueError(f"Unable to find index instrument {exchange}:{tradingsymbol}")
+        instrument = self._by_exchange_symbol.get((exchange, tradingsymbol))
+        if instrument is None:
+            for candidate in self._by_exchange_name.get((exchange, tradingsymbol), []):
+                instrument = candidate
+                break
+        if instrument is None:
+            raise ValueError(f"Unable to find index instrument {exchange}:{tradingsymbol}")
+        return self._selected_instrument(
+            instrument,
+            underlying=underlying,
+            basket_role="index" if underlying != "INDIA_VIX" else "volatility_index",
+            mode="full",
+        )
 
     def _instruments(self) -> list[dict[str, Any]]:
         if self._cached_instruments is None:
             LOGGER.info("Loading Kite instruments master")
             self._cached_instruments = self.kite.instruments()
+            for instrument in self._cached_instruments:
+                exchange = str(instrument.get("exchange") or "")
+                symbol = str(instrument.get("tradingsymbol") or "")
+                name = str(instrument.get("name") or "")
+                self._by_exchange_symbol[(exchange, symbol)] = instrument
+                self._by_exchange_name.setdefault((exchange, name), []).append(instrument)
         return self._cached_instruments
 
     def _find_front_future(
         self,
-        instruments: list[dict[str, Any]],
         underlying: str,
         exchange: str,
     ) -> SelectedInstrument:
         future_candidates = [
             instrument
-            for instrument in instruments
-            if instrument.get("exchange") == exchange
-            and instrument.get("name") == underlying
-            and instrument.get("instrument_type") == "FUT"
+            for instrument in self._by_exchange_name.get((exchange, underlying), [])
+            if instrument.get("instrument_type") == "FUT"
             and _is_today_or_future(instrument.get("expiry"))
         ]
         if not future_candidates:
@@ -204,13 +207,12 @@ class InstrumentSelector:
 
     def _find_option_basket(
         self,
-        instruments: list[dict[str, Any]],
         underlying: str,
         exchange: str,
         atm_strike: int,
         strike_step: int,
     ) -> list[SelectedInstrument]:
-        expiry = self._nearest_option_expiry(instruments, underlying, exchange)
+        expiry = self._nearest_option_expiry(underlying, exchange)
         target_strikes = {
             atm_strike + offset * strike_step
             for offset in range(-self.settings.option_strike_window, self.settings.option_strike_window + 1)
@@ -222,10 +224,8 @@ class InstrumentSelector:
                 basket_role="option",
                 mode="full",
             )
-            for instrument in instruments
-            if instrument.get("exchange") == exchange
-            and instrument.get("name") == underlying
-            and instrument.get("instrument_type") in {"CE", "PE"}
+            for instrument in self._by_exchange_name.get((exchange, underlying), [])
+            if instrument.get("instrument_type") in {"CE", "PE"}
             and instrument.get("expiry") == expiry
             and int(float(instrument.get("strike") or 0)) in target_strikes
         ]
@@ -250,17 +250,14 @@ class InstrumentSelector:
 
     def _nearest_option_expiry(
         self,
-        instruments: list[dict[str, Any]],
         underlying: str,
         exchange: str,
     ) -> date:
         expiries = sorted(
             {
                 instrument["expiry"]
-                for instrument in instruments
-                if instrument.get("exchange") == exchange
-                and instrument.get("name") == underlying
-                and instrument.get("instrument_type") in {"CE", "PE"}
+                for instrument in self._by_exchange_name.get((exchange, underlying), [])
+                if instrument.get("instrument_type") in {"CE", "PE"}
                 and _is_today_or_future(instrument.get("expiry"))
             }
         )

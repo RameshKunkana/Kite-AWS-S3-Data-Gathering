@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import logging
 import signal
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, time as time_value, timedelta, timezone
@@ -27,19 +28,31 @@ class StartupPlan:
     should_wait_for_market_open: bool
 
 
-def _wait_until(target_time: time_value, label: str) -> None:
+def _ist_now() -> str:
+    return datetime.now(tz=IST).strftime("%H:%M")
+
+
+def _wait_until(target_time: time_value) -> None:
     now = datetime.now(tz=IST)
     target = datetime.combine(now.date(), target_time, tzinfo=IST)
-
     if now >= target:
         return
-
     sleep_seconds = (target - now).total_seconds()
-    LOGGER.info("Waiting %.0f seconds until %s at %s", sleep_seconds, label, target.isoformat())
     while sleep_seconds > 0:
         time.sleep(min(sleep_seconds, 30))
         now = datetime.now(tz=IST)
         sleep_seconds = (target - now).total_seconds()
+
+
+def _log_at(target_time: time_value, message: str) -> None:
+    def _run() -> None:
+        now = datetime.now(tz=IST)
+        target = datetime.combine(now.date(), target_time, tzinfo=IST)
+        delay = (target - now).total_seconds()
+        if delay > 0:
+            time.sleep(delay)
+        LOGGER.info("%s IST — %s", datetime.now(tz=IST).strftime("%H:%M"), message)
+    threading.Thread(target=_run, daemon=True, name="milestone-logger").start()
 
 
 def _has_market_closed(market_end: time_value, grace_seconds: int) -> bool:
@@ -109,6 +122,11 @@ def main() -> None:
     try:
         settings = Settings.from_env()
         configure_logging(settings.log_level)
+        today = datetime.now(tz=IST).date()
+        if today in settings.market_holidays:
+            LOGGER.info("%s is a market holiday, no data collection today. Exiting.", today)
+            return
+
         if _has_market_closed(settings.schedule.market_end, settings.market_close_grace_seconds):
             LOGGER.info(
                 "Market close plus grace window has already passed for today, exiting without starting the streamer"
@@ -116,25 +134,66 @@ def main() -> None:
             return
 
         plan = _startup_plan(settings.schedule)
-        LOGGER.info("Startup mode selected: %s", plan.mode)
+        schedule = settings.schedule
+        current_time = datetime.now(tz=IST).time()
 
         selector = InstrumentSelector(settings)
 
         if plan.should_wait_for_premarket:
-            _wait_until(settings.schedule.premarket_start, "pre-market start")
+            LOGGER.info(
+                "%s IST — Waiting for pre-market session to open at %s IST...",
+                _ist_now(), schedule.premarket_start.strftime("%H:%M"),
+            )
+            _wait_until(schedule.premarket_start)
+            LOGGER.info("%s IST — Pre-market session open, price discovery in progress", _ist_now())
+            _log_at(schedule.premarket_end, "Pre-market session closed, prices locked")
+
+        elif plan.should_collect_premarket_references:
+            if current_time < schedule.premarket_end:
+                LOGGER.info("%s IST — Pre-market session in progress, capturing reference prices...", _ist_now())
+                _log_at(schedule.premarket_end, "Pre-market session closed, prices locked")
+            else:
+                LOGGER.info("%s IST — Pre-market closed, capturing locked price for basket...", _ist_now())
 
         reference_prices: dict[str, float] = {}
         if plan.should_collect_premarket_references:
             reference_prices = _collect_reference_prices(selector, settings)
         else:
-            LOGGER.info(
-                "Late start detected after basket selection cutoff; building basket from live quote snapshot"
-            )
+            LOGGER.info("%s IST — Market already open, building basket from live snapshot...", _ist_now())
 
         market_basket = selector.build_market_basket(reference_prices=reference_prices)
+        nifty_ref = market_basket.references.get("NIFTY")
+        sensex_ref = market_basket.references.get("SENSEX")
+
+        if plan.should_collect_premarket_references:
+            LOGGER.info(
+                "%s IST — Reference prices captured: NIFTY=%s SENSEX=%s",
+                _ist_now(),
+                nifty_ref.reference_price if nifty_ref else "?",
+                sensex_ref.reference_price if sensex_ref else "?",
+            )
+        LOGGER.info(
+            "            Building basket... NIFTY ATM=%s, SENSEX ATM=%s, %s instruments selected",
+            nifty_ref.atm_strike if nifty_ref else "?",
+            sensex_ref.atm_strike if sensex_ref else "?",
+            len(market_basket.instruments_by_token),
+        )
 
         if plan.should_wait_for_market_open:
-            _wait_until(settings.schedule.market_start, "market open")
+            LOGGER.info(
+                "%s IST — Basket ready, waiting for market open at %s IST",
+                _ist_now(), schedule.market_start.strftime("%H:%M"),
+            )
+            _wait_until(schedule.market_start)
+            LOGGER.info(
+                "%s IST — Market open, starting live stream for %s instruments",
+                _ist_now(), len(market_basket.instruments_by_token),
+            )
+        else:
+            LOGGER.info(
+                "%s IST — Starting live stream for %s instruments",
+                _ist_now(), len(market_basket.instruments_by_token),
+            )
 
         publisher = KinesisPublisher(
             stream_name=settings.kinesis_stream_name,
