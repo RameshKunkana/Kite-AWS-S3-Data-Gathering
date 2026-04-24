@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -79,7 +81,7 @@ class InstrumentSelector:
         reference_prices: dict[str, float] | None = None,
     ) -> MarketBasket:
         self._instruments()
-        index_quotes = self.kite.quote("NSE:NIFTY 50", "BSE:SENSEX")
+        index_quotes = _kite_call(lambda: self.kite.quote("NSE:NIFTY 50", "BSE:SENSEX"))
         reference_prices = reference_prices or {}
 
         basket: dict[int, SelectedInstrument] = {}
@@ -175,7 +177,7 @@ class InstrumentSelector:
     def _instruments(self) -> list[dict[str, Any]]:
         if self._cached_instruments is None:
             LOGGER.info("Loading Kite instruments master")
-            self._cached_instruments = self.kite.instruments()
+            self._cached_instruments = _kite_call(self.kite.instruments)
             for instrument in self._cached_instruments:
                 exchange = str(instrument.get("exchange") or "")
                 symbol = str(instrument.get("tradingsymbol") or "")
@@ -311,6 +313,21 @@ def _resolve_reference_price(quote: dict[str, Any], mode: str) -> tuple[float, s
         return float(close_price), "ohlc_close"
 
     raise ValueError(f"Unable to resolve reference price from quote payload: {quote}")
+
+
+def _kite_call(fn: Callable[[], Any], retries: int = 3, backoff_seconds: float = 3.0) -> Any:
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except Exception:
+            if attempt >= retries:
+                raise
+            LOGGER.warning(
+                "Kite API call failed attempt=%s/%s, retrying in %.0fs",
+                attempt, retries, backoff_seconds * attempt,
+                exc_info=True,
+            )
+            time.sleep(backoff_seconds * attempt)
 
 
 def _is_today_or_future(value: Any) -> bool:

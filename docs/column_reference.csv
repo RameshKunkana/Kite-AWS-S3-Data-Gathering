@@ -1,0 +1,36 @@
+Category,Column,Meaning
+Timing,event_time,Primary timestamp used for analysis - exchange timestamp if available otherwise ingestion time
+Timing,ingestion_time,When the tick was received by the EC2 ingestor (IST)
+Timing,exchange_timestamp,Exact time the trade occurred on the exchange - can be null for some tick types
+Timing,last_trade_time,Timestamp of the last trade for this instrument
+Instrument Identity,instrument_token,Kite's internal numeric ID for the instrument
+Instrument Identity,tradingsymbol,Trading symbol (e.g. NIFTY2542524200CE)
+Instrument Identity,exchange,Where it trades - NSE / BSE / NFO / BFO
+Instrument Identity,segment,Market segment - NFO-OPT / NFO-FUT / NSE / BFO-OPT etc.
+Instrument Identity,name,Human readable instrument name
+Instrument Identity,underlying,The index behind the instrument - NIFTY / SENSEX / INDIA_VIX
+Instrument Identity,basket_role,Role in our basket - index / future / option / volatility_index
+Instrument Identity,instrument_type,CE (call) / PE (put) / FUT (future) / EQ (index spot)
+Instrument Identity,option_type,CE or PE - null for non-options
+Instrument Identity,expiry,Expiry date in YYYY-MM-DD format - null for indices
+Instrument Identity,strike,Strike price - null for non-options
+Instrument Identity,lot_size,Units per lot
+Instrument Identity,tick_size,Minimum price movement
+Market Data,mode,Kite subscription mode - always full in our basket
+Market Data,last_price,Last traded price (LTP) - the core price column
+Market Data,last_quantity,Quantity traded in the last transaction
+Market Data,average_price,Volume weighted average price (VWAP) for the day
+Market Data,volume,Cumulative traded volume since market open
+Market Data,buy_quantity,Total pending buy quantity sitting in the order book
+Market Data,sell_quantity,Total pending sell quantity sitting in the order book
+Market Data,change,Price change from previous day's close
+Open Interest,oi,Open interest - number of outstanding contracts right now
+Open Interest,oi_day_high,Highest OI reached today
+Open Interest,oi_day_low,Lowest OI reached today
+OHLC,open_price,Today's opening price
+OHLC,high_price,Today's intraday high
+OHLC,low_price,Today's intraday low
+OHLC,close_price,Previous day's closing price
+Order Book,depth_buy,"Top 5 buy orders - each entry has price, quantity, orders"
+Order Book,depth_sell,"Top 5 sell orders - each entry has price, quantity, orders"
+Raw,raw_tick,Full raw JSON from Kite WebSocket exactly as received - useful for debugging or accessing anything not extracted above
