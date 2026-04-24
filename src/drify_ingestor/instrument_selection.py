@@ -79,7 +79,7 @@ class InstrumentSelector:
         reference_prices: dict[str, float] | None = None,
     ) -> MarketBasket:
         self._instruments()
-        index_quotes = self.kite.quote("NSE:NIFTY 50", "BSE:SENSEX", "NSE:INDIA VIX")
+        index_quotes = self.kite.quote("NSE:NIFTY 50", "BSE:SENSEX")
         reference_prices = reference_prices or {}
 
         basket: dict[int, SelectedInstrument] = {}

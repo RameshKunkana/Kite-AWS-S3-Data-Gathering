@@ -107,12 +107,11 @@ def main() -> None:
         final_key = f"{processed_prefix}{folder}/{folder}.parquet"
 
         df = spark.read.parquet(source_uri)
-        if "event_time" in df.columns:
-            df = df.orderBy("event_time")
-
         if df.rdd.isEmpty():
             print(f"Skipping {folder}: no rows in source")
             continue
+        if "event_time" in df.columns:
+            df = df.orderBy("event_time")
 
         _delete_prefix(s3_client, bucket, temp_prefix)
         df.coalesce(1).write.mode("overwrite").parquet(temp_uri)

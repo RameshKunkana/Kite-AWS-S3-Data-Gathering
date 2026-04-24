@@ -127,17 +127,6 @@ def _to_json_string(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
-def _instrument_folder(instrument: SelectedInstrument) -> str:
-    return _instrument_folder_key(
-        underlying=instrument.underlying,
-        basket_role=instrument.basket_role,
-        instrument_type=instrument.instrument_type,
-        expiry=instrument.expiry,
-        strike=instrument.strike,
-        tradingsymbol=instrument.tradingsymbol,
-    )
-
-
 def _instrument_folder_key(
     *,
     underlying: str,
