@@ -74,7 +74,7 @@ def main() -> None:
     resolved = ["JOB_NAME"] + [a for a in known_args[1:] if f"--{a}" in provided]
     args = getResolvedOptions(sys.argv, resolved)
 
-    bucket = args["bucket"]
+    bucket = _arg_or_default(args, "bucket", "drify-market-data")
     raw_root_prefix = _arg_or_default(args, "raw_root_prefix", "ticks")
     processed_root_prefix = _arg_or_default(args, "processed_root_prefix", "processed")
     region = _arg_or_default(args, "region", boto3.session.Session().region_name or "ap-south-1")
