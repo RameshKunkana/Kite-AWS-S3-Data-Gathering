@@ -31,8 +31,6 @@ class Settings:
     option_strike_window: int
     nifty_strike_step: int
     sensex_strike_step: int
-    index_mode: str
-    derivative_mode: str
     basket_reference_mode: str
     websocket_reconnect_max_tries: int
     websocket_reconnect_max_delay: int
@@ -58,8 +56,6 @@ class Settings:
             option_strike_window=int(os.getenv("OPTION_STRIKE_WINDOW", "15")),
             nifty_strike_step=int(os.getenv("NIFTY_STRIKE_STEP", "50")),
             sensex_strike_step=int(os.getenv("SENSEX_STRIKE_STEP", "100")),
-            index_mode=os.getenv("KITE_INDEX_MODE", "quote"),
-            derivative_mode=os.getenv("KITE_DERIVATIVE_MODE", "full"),
             basket_reference_mode=os.getenv("BASKET_REFERENCE_MODE", "last_price"),
             websocket_reconnect_max_tries=int(os.getenv("KITE_RECONNECT_MAX_TRIES", "50")),
             websocket_reconnect_max_delay=int(os.getenv("KITE_RECONNECT_MAX_DELAY", "60")),

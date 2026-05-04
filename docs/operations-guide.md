@@ -206,15 +206,15 @@ Replace with the new year's dates in `YYYY-MM-DD` format, comma-separated.
 
 ## Quick Reference
 
-| Task | Command |
-|---|---|
-| Connect to EC2 | `ssh -i "path/to/key.pem" ubuntu@<IP>` |
-| Go to repo | `cd ~/apps/drify/repo` |
-| Update token | `nano .env` → update `KITE_ACCESS_TOKEN` |
-| **Start data collection** | **`sudo systemctl restart drify-ingestor`** |
-| Pull latest code (if updated) | `git pull` |
-| Stop service | `sudo systemctl stop drify-ingestor` |
-| Restart service | `sudo systemctl restart drify-ingestor` |
-| Check status | `sudo systemctl status drify-ingestor` |
-| View live logs | `sudo journalctl -u drify-ingestor -f` |
-| Upload Glue script | `aws s3 cp infra/glue_daily_compaction.py s3://drify-market-data/scripts/glue_daily_compaction.py --region ap-south-1` |
+| Tasks                          | Command                                       |
+|------------------------------- |-------------------------------------------    |
+| Connect to EC2                 | `ssh -i "path/to/key.pem" ubuntu@<IP>`        |
+| Go to repo                     | `cd ~/apps/drify/repo`                        |
+| Update token                   | `nano .env` → update `KITE_ACCESS_TOKEN`      |
+| **Start data collection**      | **`sudo systemctl restart drify-ingestor`**   |
+| Pull latest code (if updated)  | `git pull`                                    |
+| Stop service                   | `sudo systemctl stop drify-ingestor`          |
+| Restart service                | `sudo systemctl restart drify-ingestor`       |
+| Check status                   | `sudo systemctl status drify-ingestor`        |
+| View live logs                 | `sudo journalctl -u drify-ingestor -f`        |
+| Upload Glue script             | `aws s3 cp infra/glue_daily_compaction.py s3://drify-market-data/scripts/glue_daily_compaction.py --region ap-south-1` |

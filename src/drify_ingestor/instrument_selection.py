@@ -162,9 +162,7 @@ class InstrumentSelector:
     ) -> SelectedInstrument:
         instrument = self._by_exchange_symbol.get((exchange, tradingsymbol))
         if instrument is None:
-            for candidate in self._by_exchange_name.get((exchange, tradingsymbol), []):
-                instrument = candidate
-                break
+            instrument = next(iter(self._by_exchange_name.get((exchange, tradingsymbol), [])), None)
         if instrument is None:
             raise ValueError(f"Unable to find index instrument {exchange}:{tradingsymbol}")
         return self._selected_instrument(

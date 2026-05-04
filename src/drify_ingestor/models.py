@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -122,8 +123,6 @@ def _normalize_value(value: Any) -> Any:
 
 
 def _to_json_string(value: Any) -> str:
-    import json
-
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
