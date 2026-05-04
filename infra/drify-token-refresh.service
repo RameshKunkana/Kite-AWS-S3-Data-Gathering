@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/apps/drify/repo
-ExecStart=/home/ubuntu/apps/drify/venv/bin/python scripts/token_refresh.py
+ExecStart=/home/ubuntu/apps/drify/repo/.venv/bin/python scripts/token_refresh.py
 StandardOutput=journal
 StandardError=journal
 
