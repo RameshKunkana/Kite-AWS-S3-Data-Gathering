@@ -1,0 +1,15 @@
+[Unit]
+Description=DriFy Kite Token Refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/apps/drify/repo
+ExecStart=/home/ubuntu/apps/drify/venv/bin/python scripts/token_refresh.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -9,6 +9,8 @@ dependencies = [
     "kiteconnect>=5.0.1",
     "pyarrow>=18.0.0",
     "python-dotenv>=1.0.1",
+    "pyotp>=2.9.0",
+    "requests>=2.31.0",
 ]
 
 [build-system]

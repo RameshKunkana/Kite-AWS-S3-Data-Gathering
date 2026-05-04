@@ -1,0 +1,18 @@
+[Unit]
+Description=DriFy Market Data Ingestor
+After=network-online.target drify-token-refresh.service
+Wants=network-online.target
+Requires=drify-token-refresh.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/apps/drify/repo
+ExecStart=/home/ubuntu/apps/drify/venv/bin/python -m drify_ingestor.main
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
